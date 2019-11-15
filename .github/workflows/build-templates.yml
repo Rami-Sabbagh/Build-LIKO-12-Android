@@ -1,0 +1,72 @@
+name: Build Templates
+on: push
+
+jobs:
+  android:
+    name: Create android template
+    runs-on: ubuntu-18.04
+    steps:
+    - name: Update APT packages
+      run: sudo apt-get update
+    
+    - name: Install LuaJIT
+      run: sudo apt-get install luajit
+
+    - name: Install JDK
+      run: sudo apt-get install openjdk-8-jdk
+
+    - name: Checkout
+      uses: actions/checkout@v1
+
+    - name: Downloading LÖVE
+      run: |
+        LOVE_VERSION=`cat LOVE_VERSION.txt`
+        wget -v -O love_android.tar.gz https://bitbucket.org/rude/love/downloads/love-$LOVE_VERSION-android-source.tar.gz
+        mkdir love_android
+        tar xvzf love_android.tar.gz -C $GITHUB_WORKSPACE/love_android/
+        mv -v love_android/love-$LOVE_VERSION-android/* love_android/
+        rm -v -r love_android/love-$LOVE_VERSION-android/
+
+    - name: Injecting Files
+      run: cp -v -f -r android/inject_files/. love_android
+
+    - name: Patching Files
+      run: luajit android/patch_android.lua
+    
+    - name: Installing Android SDK & NDK
+      env:
+        ANDROID_COMPILE_SDK: 28
+        ANDROID_BUILD_TOOLS: 28.0.3
+        ANDROID_SDK_TOOLS: 4333796
+      run: |
+        wget -v -O android-sdk-linux.zip https://dl.google.com/android/repository/sdk-tools-linux-${ANDROID_SDK_TOOLS}.zip
+        unzip -d android-sdk android-sdk-linux.zip
+        rm android-sdk-linux.zip
+        yes | android-sdk/tools/bin/sdkmanager "platforms;android-${ANDROID_COMPILE_SDK}" >/dev/null
+        yes | android-sdk/tools/bin/sdkmanager "platform-tools" >/dev/null
+        yes | android-sdk/tools/bin/sdkmanager "build-tools;${ANDROID_BUILD_TOOLS}" >/dev/null
+        yes | android-sdk/tools/bin/sdkmanager "extras;android;m2repository" "extras;google;m2repository" >/dev/null
+        yes | android-sdk/tools/bin/sdkmanager "ndk-bundle" >/dev/null
+    
+    - name: Accepting Android Licenses
+      run: |
+        set +o pipefail
+        yes | android-sdk/tools/bin/sdkmanager --licenses
+        set -o pipefail
+    
+    - name: Building LÖVE
+      run: |
+        export ANDROID_HOME=$GITHUB_WORKSPACE/android-sdk
+        export ANDROID_NDK_HOME=$ANDROID_HOME/ndk-bundle
+        cd love_android
+        chmod +x ./gradlew
+        bash ./gradlew assembleRelease --no-daemon
+    
+    - name: Move and rename the built apk
+      run: mv -f -v ./love_android/app/build/outputs/apk/release/app-release-unsigned.apk ./love_android.apk
+    
+    - name: Upload android artifact
+      uses: actions/upload-artifact@v1
+      with:
+        name: love_android
+        path: love_android.apk
